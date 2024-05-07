@@ -1,0 +1,298 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 27,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Stock signal detector uses yahoo financial data for given ticker and runs a technical analys to determine buy and sell signals\n",
+    "\n",
+    "import pandas as pd\n",
+    "import yfinance as yf\n",
+    "import matplotlib.pyplot as plt"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 28,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def get_yahoo_data(ticker, start_date, end_date):\n",
+    "    \n",
+    "    \"\"\"\n",
+    "    Download yahoo finance data with yfinance module for a given ticker symbol.\n",
+    "\n",
+    "    Parameters:\n",
+    "        tkr (str): Ticker symbol for which yahoo finance data is downloaded.\n",
+    "        start_date (str): Start date for dataset to be dowloaded. \n",
+    "        end_date (str): End date for dataset to be downloaded.\n",
+    "\n",
+    "    Returns:\n",
+    "        pandas.DataFrame: DataFrame with the downloaded data for given ticker.\n",
+    "    \"\"\"\n",
+    "    \n",
+    "    try:\n",
+    "        df1 = yf.download(ticker, start_date, end_date)\n",
+    "        if df1.empty:\n",
+    "            raise ValueError(\"No data returned from Yahoo Finance.\")\n",
+    "        return df1\n",
+    "    except yf.YFinanceError as e:\n",
+    "        print(f\"Error occurred while retrieving data: {e}\")\n",
+    "        return None"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 29,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def calc_ema(span1, span2, df):\n",
+    "    \n",
+    "    \"\"\"\n",
+    "    Calculate exponential moving averages (EMA) for a given column in a DataFrame.\n",
+    "\n",
+    "    Parameters:\n",
+    "        column_name (str): The name of the column for which moving averages are calculated.\n",
+    "        df (pandas.DataFrame): The DataFrame containing the data.\n",
+    "        span1 (int): The span for the first EMA.\n",
+    "        span2 (int): The span for the second EMA.\n",
+    "\n",
+    "    Returns:\n",
+    "        pandas.DataFrame: DataFrame with the calculated EMAs added as columns.\n",
+    "    \"\"\"\n",
+    "    \n",
+    "    df['EMA_A'] = df['Close'].ewm(span=span1, adjust=False).mean()\n",
+    "    df['EMA_B'] = df['Close'].ewm(span=span2, adjust=False).mean()\n",
+    "    return df"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 30,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# def cross_direction(df):\n",
+    "    \n",
+    "#     \"\"\"\n",
+    "#     Tracks when the EMA_A crosses above or below  EMA_B Exponential Moving Average.\n",
+    "#     The cross direction is added to a new column called 'Cross_Direction'\n",
+    "#     \"\"\"\n",
+    "    \n",
+    "#     crossed_above = (df['EMA_A'] > df['EMA_B']) & (df['EMA_A'].shift(1) < df['EMA_B'].shift(1))\n",
+    "#     df.loc[crossed_above, 'Cross_Direction'] = 'crossed up'\n",
+    "#     condition_met = df[df['Cross_Direction'].notna()]\n",
+    "\n",
+    "#     crossed_below = (df['EMA_A'] < df['EMA_B']) & (df['EMA_A'].shift(1) > df['EMA_B'].shift(1))\n",
+    "#     df.loc[crossed_below, 'Cross_Direction'] = 'crossed down'\n",
+    "#     condition_met = df[df['Cross_Direction'].notna()]\n",
+    "    \n",
+    "#     return condition_met"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 31,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def cross_direction(df):\n",
+    "    \n",
+    "    \"\"\"\n",
+    "    Tracks when the EMA_A crosses above or below  EMA_B Exponential Moving Average.\n",
+    "    The cross direction is added to a new column called 'Cross_Direction'\n",
+    "    \"\"\"\n",
+    "    \n",
+    "    crossed_above = (df['EMA_A'] > df['EMA_B']) & (df['EMA_A'].shift(1) < df['EMA_B'].shift(1))\n",
+    "    df.loc[crossed_above, 'Cross_Direction'] = 'crossed up'\n",
+    "    condition_met = df[df['Cross_Direction'].notna()]\n",
+    "\n",
+    "    crossed_below = (df['EMA_A'] <= df['EMA_B']) & (df['EMA_A'].shift(1) > df['EMA_B'].shift(1))\n",
+    "    df.loc[crossed_below, 'Cross_Direction'] = 'crossed down'\n",
+    "    condition_met = df[df['Cross_Direction'].notna()]\n",
+    "    \n",
+    "    return condition_met"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 32,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def initialize_investment(df):\n",
+    "    \"\"\"\n",
+    "    Find the first crossed up event and set the initial cost.\n",
+    "    The ticker closing price is set to initial cost as init_cost.\n",
+    "    \"\"\"\n",
+    "\n",
+    "    for index, row in df.iterrows():\n",
+    "        if row['Cross_Direction'] == 'crossed up':\n",
+    "            init_cost = row['Close']  # Set init_cost to the price at the first crossed up event\n",
+    "            cash = init_cost  # Set cash to the initial cost\n",
+    "            # print(\"                     Your initial investment is: $ {}\".format(init_cost))\n",
+    "            # print(\"The cash value is set to the initial investment: $ {}\".format(cash))\n",
+    "            return init_cost, cash  # Return the values once 'crossed up' is found"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 33,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def calc_profit(df, set_last_signal):\n",
+    "\n",
+    "    init_cost = 0\n",
+    "    cash = init_cost \n",
+    "    shares_owned = 0\n",
+    "    prev_crossed_above = False\n",
+    "    transactions = []\n",
+    "    \n",
+    "    df.iloc[-1, df.columns.get_loc('Cross_Direction')] = set_last_signal # Update DataFrame with the last signal\n",
+    "\n",
+    "    for index, row in df.iterrows():\n",
+    "        if row['Cross_Direction'] == 'crossed up' and prev_crossed_above == False:  # Check if the Cross_Direction column is 'crossed up'\n",
+    "            cash -= row['Close']  # Buy one share. Deduct purchase price from cash\n",
+    "            transactions.append(('Buy', index, row['Open'], row['Close'], row['Close'], cash))\n",
+    "            prev_crossed_above = True\n",
+    "\n",
+    "        elif row['Cross_Direction'] == 'crossed down' and prev_crossed_above:  # Check if the Cross_Direction column is 'crossed down':\n",
+    "            cash += row['Open'] # Sell one share. Add sale price to cash\n",
+    "            transactions.append(('Sell', index, row['Open'], row['Close'], row['Open'], cash))\n",
+    "            # transactions.append(('Sell', index, row['Open'], row['Close'], row['Open'], row['Open']))  # Record 'Open' price as sell price, and keep the cash value unchanged\n",
+    "            prev_crossed_above = False\n",
+    "\n",
+    "        else:\n",
+    "            pass\n",
+    "\n",
+    "    last_signal_as_cash = cash\n",
+    "    transactions_df = pd.DataFrame(transactions, columns=['Action', 'Date', 'Open', 'Close', 'Price', 'Cash'])\n",
+    "    \n",
+    "    return transactions_df, last_signal_as_cash # returns a new dataframe for transactions and also returns the last cash value as last_signal_as_cashh"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 34,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def investment_performance(ticker, initial_investment, portfolio_value):\n",
+    "\n",
+    "    \"\"\"\n",
+    "    Outputs the investment performance.  Performance is claculated by taking the \n",
+    "    initial_investment (stock puchase price) and subtracting the portfolio_value.\n",
+    "    Portfolio value is the last crossed_down price from\n",
+    "    the calc_proffit function retruned.\n",
+    "    \"\"\"\n",
+    "\n",
+    "    profit_loss = portfolio_value - initial_investment\n",
+    "    # percent = (profit_loss / initial_investment) * 100\n",
+    "    percent = (portfolio_value / initial_investment) * 100\n",
+    "\n",
+    "    result_string = \"\\n\"\n",
+    "    result_string += '                             Results For Ticker:   {}\\n'.format(ticker)\n",
+    "    result_string += '                             Initial Investment: $ {}\\n'.format(round(initial_investment, 1))\n",
+    "    result_string += \"                          Final Portfolio Value: $ {}\\n\".format(int(portfolio_value))\n",
+    "    # result_string += \"                                    Profit/Loss: $ {}\\n\".format(round(profit_loss, 1))\n",
+    "    result_string += \"                                        Percent:   {:.1f} %\\n\\n\".format(percent)\n",
+    "\n",
+    "    return result_string"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 35,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def plot_graph(ticker_data, transactions):\n",
+    "    plt.figure(figsize=(16, 8))\n",
+    "    plt.plot(ticker_data.index, ticker_data['Close'], label='Close Price', color='gray')\n",
+    "    plt.gca().set_facecolor('black')  # Set the background color to black\n",
+    "    # plt.plot(ticker_data.index, ticker_data['EMA_A'], label='EMA_A', linestyle='--')\n",
+    "    # plt.plot(ticker_data.index, ticker_data['EMA_B'], label='EMA_B', linestyle='--')\n",
+    "    plt.scatter(ticker_data.index[ticker_data['Cross_Direction'] == 'crossed up'], \n",
+    "                    ticker_data['Close'][ticker_data['Cross_Direction'] == 'crossed up'], \n",
+    "                    marker='^', color='lightgreen', s=50, label='Buy')\n",
+    "\n",
+    "    plt.scatter(ticker_data.index[ticker_data['Cross_Direction'] == 'crossed down'], \n",
+    "                ticker_data['Close'][ticker_data['Cross_Direction'] == 'crossed down'], \n",
+    "                marker='v', color='red', label='Sell')\n",
+    "    plt.title('Closing Price and EMAs for {}'.format(ticker))\n",
+    "    plt.xticks(ticker_data.index[::30], ticker_data.index[::30].strftime('%Y-%m-%d'), rotation=45)\n",
+    "    plt.xlabel('Date')\n",
+    "    plt.ylabel('Price')\n",
+    "    plt.legend()\n",
+    "    plt.show()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 36,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# signal.tail()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 37,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# ticker_data.tail()\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 38,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "[*********************100%%**********************]  1 of 1 completed"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "\n",
+      "                             Results For Ticker:   googl\n",
+      "                             Initial Investment: $ 135.3\n",
+      "                          Final Portfolio Value: $ 18\n",
+      "                                        Percent:   13.8 %\n",
+      "\n",
+      "\n"
+     ]
+    },
+    {
+     "data": {
+      "image/png": 
